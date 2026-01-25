@@ -218,6 +218,20 @@ class AttendancePDFExtractor:
                 continue
 
             header_rows = table[max(0, data_start-2):data_start]
+            
+            # Extract all date headers from first header row (columns 3 onwards)
+            date_headers = {}
+            date_pattern = re.compile(r'([A-Za-z]+\.?\s+\d{1,2}\.\d{2})')
+            
+            if header_rows and len(header_rows) > 0:
+                for col_idx in range(3, len(header_rows[0])):
+                    header_val = str(header_rows[0][col_idx]).strip()
+                    if header_val:
+                        header_val = header_val.replace('\n', ' ').replace('\r', ' ')
+                        header_val = ' '.join(header_val.split())
+                        # Check if header matches date pattern (e.g., "Tue. 13.01")
+                        if date_pattern.match(header_val):
+                            date_headers[col_idx] = header_val
 
             for row in table[data_start:]:
                 if not row or len(row) < 4:
@@ -232,26 +246,40 @@ class AttendancePDFExtractor:
                 if not employee_name or employee_name.upper() in ['EMPLOYEE', '', 'NONE']:
                     continue
 
-                # Extract column 4 (index 3) as Shift - unconditionally
-                shift = ""
-                shift_timing = ""
-                if len(row) > 3 and row[3]:
-                    col4 = str(row[3])
-                    # First, try to extract timing pattern (e.g., "05:00-13:00")
-                    time_match = re.search(r"(\d{1,2}:\d{2}\s*-\s*\d{1,2}:\d{2})", col4)
-                    if time_match:
-                        shift_timing = time_match.group(1).strip()
-                        # Shift is everything else
-                        shift = col4.replace(shift_timing, '').strip()
-                    else:
-                        # No timing pattern found, entire col4 is shift
-                        shift = col4.strip()
-                else:
-                    shift = ""
+                # Extract shift data from column 4 (index 3) and other date columns
+                shift_data = {}  # {col_idx: {'shift': ..., 'sign_on': ..., 'sign_off': ...}}
+                
+                for col_idx in range(3, len(row)):
+                    if col_idx in date_headers or col_idx == 3:
+                        col_val = str(row[col_idx]) if col_idx < len(row) and row[col_idx] else ""
+                        
+                        shift = ""
+                        sign_on = ""
+                        sign_off = ""
+                        
+                        if col_val:
+                            # Extract timing pattern (e.g., "05:00-13:00")
+                            time_match = re.search(r"(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})", col_val)
+                            if time_match:
+                                sign_on = time_match.group(1).strip()
+                                sign_off = time_match.group(2).strip()
+                                # Shift is everything else (remove timing)
+                                shift = col_val
+                                shift = re.sub(r"\d{1,2}:\d{2}\s*-\s*\d{1,2}:\d{2}", "", shift).strip()
+                            else:
+                                # No timing, entire value is shift
+                                shift = col_val.strip()
+                        
+                        shift_data[col_idx] = {
+                            'shift': shift,
+                            'sign_on': sign_on,
+                            'sign_off': sign_off
+                        }
 
-                # Attendance codes start from column 4 (index 4) onwards
+                # Attendance codes start from the next column after the last date column
+                last_date_col = max(date_headers.keys()) if date_headers else 3
                 attendance_codes = []
-                for i in range(4, len(row)):
+                for i in range(last_date_col + 1, len(row)):
                     code = str(row[i]).strip() if row[i] else ""
                     code = code.replace('\n', '').replace('\r', '').strip()
                     attendance_codes.append(code)
@@ -261,21 +289,21 @@ class AttendancePDFExtractor:
                     'Personnel_Number': personnel_num,
                     'Scheduling_Row': scheduling_row,
                     'Attendance_Codes': attendance_codes,
-                    'Shift': shift,
-                    'Shift_Timings': shift_timing
+                    'Shift_Data': shift_data,
+                    'Date_Headers': date_headers
                 }
                 all_data.append(record)
 
         return all_data
 
     def create_dataframe(self):
-        """Create structured dataframe from attendance data"""
+        """Create structured dataframe from attendance data with split Sign On/Off times"""
         data = self.parse_attendance_data()
 
         if not data:
             return pd.DataFrame()
 
-        max_days = max(len(record['Attendance_Codes']) for record in data)
+        max_days = max(len(record['Attendance_Codes']) for record in data) if data else 0
 
         is_paid_time_col = False
         if data:
@@ -286,16 +314,45 @@ class AttendancePDFExtractor:
                 is_paid_time_col = True
                 max_days -= 1
 
+        # Get date headers from first record
+        date_headers = data[0].get('Date_Headers', {}) if data else {}
+        
+        # Extract dates from headers (e.g., "13.01" from "Tue. 13.01")
+        date_map = {}  # {col_idx: date_str}
+        for col_idx, header in date_headers.items():
+            match = re.search(r'(\d{1,2}\.\d{2})', header)
+            if match:
+                date_map[col_idx] = match.group(1)
+
+        # Build column order with date columns first
+        shift_col_indices = sorted([col_idx for col_idx in date_headers.keys()])
+        
         rows = []
         for record in data:
             row_dict = {
                 'Employee': record.get('Employee', ''),
                 'Personnel_Number': record.get('Personnel_Number', ''),
-                'Scheduling_Row': record.get('Scheduling_Row', ''),
-                'Shift': record.get('Shift', ''),
-                'Shift_Timings': record.get('Shift_Timings', '')
+                'Scheduling_Row': record.get('Scheduling_Row', '')
             }
+            
+            shift_data = record.get('Shift_Data', {})
+            
+            # Add shift columns for each date in sorted order
+            for col_idx in shift_col_indices:
+                if col_idx in shift_data:
+                    shift_info = shift_data[col_idx]
+                    date_str = date_map.get(col_idx, '')
+                    
+                    # Create Shift, Sign On and Sign Off columns for this date
+                    shift_col = f"Shift ({date_str})" if date_str else "Shift"
+                    sign_on_col = f"Sign On time ({date_str})" if date_str else "Sign On time"
+                    sign_off_col = f"Sign Off time ({date_str})" if date_str else "Sign Off time"
+                    
+                    row_dict[shift_col] = shift_info.get('shift', '')
+                    row_dict[sign_on_col] = shift_info.get('sign_on', '')
+                    row_dict[sign_off_col] = shift_info.get('sign_off', '')
 
+            # Add attendance codes (daily)
             attendance_codes = record['Attendance_Codes'].copy() if record['Attendance_Codes'] else []
             paid_time = ""
             if is_paid_time_col and len(attendance_codes) > max_days:
