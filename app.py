@@ -194,6 +194,10 @@ def display_roster_report(df, department, conversion_type):
                 st.markdown("**Leave Distribution**")
                 leave_df = pd.DataFrame(list(leave_analysis.items()), 
                                        columns=['Leave Type', 'Count'])
+                
+                # Debug output
+                st.write("DEBUG - Leave counts:", leave_analysis)
+                
                 fig2 = px.pie(leave_df, values='Count', names='Leave Type',
                              title='Leaves by Type')
                 st.plotly_chart(fig2, use_container_width=True)
