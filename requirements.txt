@@ -1,0 +1,8 @@
+streamlit==1.29.0
+pandas==2.2.0
+openpyxl==3.1.2
+pdfplumber==0.11.7
+pdfminer.six==20250506
+pypdfium2>=4.18.0
+Pillow>=9.1
+plotly>=5.17.0
