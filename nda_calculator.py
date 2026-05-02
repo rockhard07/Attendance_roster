@@ -7,7 +7,7 @@ def extract_times(cell_str):
     """
     Extract Sign-On and Sign-Off times from duty strings.
     Format: SHIFT-STATION HH:MM-HH:MM (e.g., N-RITH 22:00-07:00)
-    Regex: (\d{2}:\d{2})-(\d{2}:\d{2})$
+    Regex: (\\d{2}:\\d{2})-(\\d{2}:\\d{2})$
     """
     if not isinstance(cell_str, str) or not cell_str.strip():
         return None
@@ -54,27 +54,21 @@ def calculate_nda(sign_on_str, sign_off_str):
         {'name': 'N4', 'value': 175, 
          'off_range': (60, 360), 'on_range': (60, 120)},   # 01:00-06:00, 01:00-02:00
         {'name': 'N3', 'value': 140, 
-         'off_range': (1, 59), 'on_range': (121, 180)},    # 00:01-00:59, 02:01-03:00
+         'off_range': (0, 59), 'on_range': (121, 180)},    # 00:00-00:59, 02:01-03:00
         {'name': 'N2', 'value': 120, 
-         'off_range': (1381, 1439), 'on_range': (181, 240)}, # 23:01-23:59, 03:01-04:00
+         'off_range': (1380, 1439), 'on_range': (181, 240)}, # 23:00-23:59, 03:01-04:00
         {'name': 'N1', 'value': 90, 
          'off_range': (1320, 1379), 'on_range': (241, 300)}  # 22:00-22:59, 04:01-05:00
     ]
 
-    # Note on 00:00/24:00:
-    # Based on analyzer.py and logical flow, 00:00 (1440) is typically treated as N3 
-    # since it's just after 23:59 (N2) and before 01:00.
-    # Let's adjust N3 off_range if necessary or handle 1440 explicitly.
-    # The user rules say 00:01 to 00:59 for N3. 
-    # If 24:00 is N3, we include it.
-    
     best_cat = None
     max_val = 0
 
     for cat in categories:
         # Check Sign Off
         off_match = cat['off_range'][0] <= off_m <= cat['off_range'][1]
-        # Explicit check for 1440 in N3 if requested
+        
+        # Explicit check for 1440 (00:00 after midnight wrap) in N3
         if cat['name'] == 'N3' and off_m == 1440:
             off_match = True
             
