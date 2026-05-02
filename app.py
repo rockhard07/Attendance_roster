@@ -487,11 +487,11 @@ def main():
     if department == "Train Operations" and train_ops_mode == "Trip Chart":
         st.markdown("Upload your Trip Chart PDF file and download the converted Excel file.")
         file_type_hint = "Trip Chart PDF"
-        conversion_type = "attendance"
+        conversion_type = "trip_chart"  # Use advanced extraction (AttendancePDFExtractor)
     elif department == "Train Operations" and train_ops_mode == "Roster":
         st.markdown("Upload your Train Operations Roster PDF file and download the converted Excel file.")
         file_type_hint = "Roster PDF"
-        conversion_type = "trip_chart"  # Use simple roster extraction
+        conversion_type = "attendance"  # Use simple roster extraction (RosterExtractor)
     else:
         st.markdown("Upload your attendance PDF file and download the converted Excel file.")
         file_type_hint = "Attendance PDF"
@@ -559,74 +559,129 @@ def main():
                         st.warning("⚠️ Please select at least one month from the sidebar 'Time Period' for the Night Shift Report.")
                     else:
                         st.markdown("---")
-                        st.markdown("### 🌙 Night Shift Report")
                         df = extract_df_from_bytes(uploaded_file.getvalue(), department, conversion_type)
                         
-                        if df is not None and not df.empty:
-                            with st.spinner("Generating Night Shift Report..."):
-                                night_report_df = create_night_shift_report(df, selected_year, selected_months, department)
-                                
-                                info_cols = ['Employee', 'Personnel_Number', 'Designation', 'Station', 'Crew Control', 'AM', 'Total']
-                                date_cols = [col for col in night_report_df.columns if col not in info_cols]
-                                
-                                st.info(f"📅 Showing {len(date_cols)} days | 🌙 Red cells = Night Shift (value 1) | Total column shows count of night shifts")
-                                
-                                def highlight_night_shifts(val):
-                                    if val == 1:
-                                        return 'background-color: #ffcccc; font-weight: bold; color: black;'
-                                    return ''
-                                
-                                try:
-                                    styled_report = night_report_df.style.map(highlight_night_shifts, subset=date_cols)
-                                except AttributeError:
-                                    styled_report = night_report_df.style.applymap(highlight_night_shifts, subset=date_cols)
-                                
-                                st.dataframe(styled_report, use_container_width=True, height=600)
-                                
-                                # Export options
-                                col_exp1, col_exp2 = st.columns(2)
-                                month_str_file = "_".join(selected_months)
-                                
-                                with col_exp1:
-                                    csv_data = night_report_df.to_csv(index=False).encode('utf-8')
-                                    st.download_button(
-                                        label="⬇️ Download Night Shift Report as CSV",
-                                        data=csv_data,
-                                        file_name=f"{Path(uploaded_file.name).stem}_night_shift_{selected_year}_{month_str_file}.csv",
-                                        mime="text/csv",
-                                        key=f"csv_{month_str_file}_night_shift"
-                                    )
-                                
-                                with col_exp2:
-                                    output = io.BytesIO()
-                                    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                                        night_report_df.to_excel(writer, sheet_name='Night Shift Report', index=False)
-                                        try:
-                                            from openpyxl.styles import PatternFill
-                                            worksheet = writer.sheets['Night Shift Report']
-                                            red_fill = PatternFill(start_color='FFCCCC', end_color='FFCCCC', fill_type='solid')
-                                            header_row = list(night_report_df.columns)
-                                            if date_cols:
-                                                first_date_col_idx = header_row.index(date_cols[0]) + 1
-                                                last_date_col_idx = header_row.index(date_cols[-1]) + 1
-                                                from openpyxl.utils import get_column_letter
-                                                first_col_letter = get_column_letter(first_date_col_idx)
-                                                last_col_letter = get_column_letter(last_date_col_idx)
+                        if department == "Train Operations":
+                            st.markdown("### 🌙 Night Duty Allowance (NDA) Report")
+                            if df is not None and not df.empty:
+                                with st.spinner("Generating NDA Report..."):
+                                    # Import here to avoid circular imports if any, or it was imported at top
+                                    from nda_calculator import generate_nda_report, load_designations
+                                    
+                                    designations = load_designations()
+                                    nda_report_df = generate_nda_report(df, designation_map=designations)
+                                    
+                                    info_cols = ['Employee', 'Personnel Number', 'Designation', 'Total Allowance (INR)']
+                                    date_cols = [col for col in nda_report_df.columns if col.startswith('Day_')]
+                                    
+                                    st.info(f"📅 Showing {len(date_cols)} days | Shows NDA Category and Cost | Totals included at the end")
+                                    
+                                    # Function to highlight cells with NDA
+                                    def highlight_nda(val):
+                                        if isinstance(val, str) and val.startswith('N'):
+                                            return 'background-color: #ffcccc; font-weight: bold; color: black;'
+                                        return ''
+                                        
+                                    try:
+                                        styled_report = nda_report_df.style.map(highlight_nda, subset=date_cols)
+                                    except AttributeError:
+                                        styled_report = nda_report_df.style.applymap(highlight_nda, subset=date_cols)
+                                        
+                                    st.dataframe(styled_report, use_container_width=True, height=600)
+                                    
+                                    # Export options
+                                    col_exp1, col_exp2 = st.columns(2)
+                                    month_str_file = "_".join(selected_months)
+                                    
+                                    with col_exp1:
+                                        csv_data = nda_report_df.to_csv(index=False).encode('utf-8')
+                                        st.download_button(
+                                            label="⬇️ Download NDA Report as CSV",
+                                            data=csv_data,
+                                            file_name=f"{Path(uploaded_file.name).stem}_nda_report_{selected_year}_{month_str_file}.csv",
+                                            mime="text/csv",
+                                            key=f"csv_{month_str_file}_nda"
+                                        )
+                                    
+                                    with col_exp2:
+                                        output = io.BytesIO()
+                                        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                                            nda_report_df.to_excel(writer, sheet_name='NDA Report', index=False)
+                                            # Optional: Add formatting to Excel
+                                        st.download_button(
+                                            label="📊 Download NDA Report as Excel",
+                                            data=output.getvalue(),
+                                            file_name=f"{Path(uploaded_file.name).stem}_nda_report_{selected_year}_{month_str_file}.xlsx",
+                                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                            key=f"excel_{month_str_file}_nda"
+                                        )
+                        else:
+                            st.markdown("### 🌙 Night Shift Report")
+                            if df is not None and not df.empty:
+                                with st.spinner("Generating Night Shift Report..."):
+                                    night_report_df = create_night_shift_report(df, selected_year, selected_months, department)
+                                    
+                                    info_cols = ['Employee', 'Personnel_Number', 'Designation', 'Station', 'Crew Control', 'AM', 'Total']
+                                    date_cols = [col for col in night_report_df.columns if col not in info_cols]
+                                    
+                                    st.info(f"📅 Showing {len(date_cols)} days | 🌙 Red cells = Night Shift (value 1) | Total column shows count of night shifts")
+                                    
+                                    def highlight_night_shifts(val):
+                                        if val == 1:
+                                            return 'background-color: #ffcccc; font-weight: bold; color: black;'
+                                        return ''
+                                    
+                                    try:
+                                        styled_report = night_report_df.style.map(highlight_night_shifts, subset=date_cols)
+                                    except AttributeError:
+                                        styled_report = night_report_df.style.applymap(highlight_night_shifts, subset=date_cols)
+                                    
+                                    st.dataframe(styled_report, use_container_width=True, height=600)
+                                    
+                                    # Export options
+                                    col_exp1, col_exp2 = st.columns(2)
+                                    month_str_file = "_".join(selected_months)
+                                    
+                                    with col_exp1:
+                                        csv_data = night_report_df.to_csv(index=False).encode('utf-8')
+                                        st.download_button(
+                                            label="⬇️ Download Night Shift Report as CSV",
+                                            data=csv_data,
+                                            file_name=f"{Path(uploaded_file.name).stem}_night_shift_{selected_year}_{month_str_file}.csv",
+                                            mime="text/csv",
+                                            key=f"csv_{month_str_file}_night_shift"
+                                        )
+                                    
+                                    with col_exp2:
+                                        output = io.BytesIO()
+                                        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                                            night_report_df.to_excel(writer, sheet_name='Night Shift Report', index=False)
+                                            try:
+                                                from openpyxl.styles import PatternFill
+                                                worksheet = writer.sheets['Night Shift Report']
+                                                red_fill = PatternFill(start_color='FFCCCC', end_color='FFCCCC', fill_type='solid')
+                                                header_row = list(night_report_df.columns)
+                                                if date_cols:
+                                                    first_date_col_idx = header_row.index(date_cols[0]) + 1
+                                                    last_date_col_idx = header_row.index(date_cols[-1]) + 1
+                                                    from openpyxl.utils import get_column_letter
+                                                    first_col_letter = get_column_letter(first_date_col_idx)
+                                                    last_col_letter = get_column_letter(last_date_col_idx)
+                                                    
+                                                    for row in worksheet.iter_rows(min_row=2, min_col=first_date_col_idx, max_col=last_date_col_idx):
+                                                        for cell in row:
+                                                            if cell.value == 1:
+                                                                cell.fill = red_fill
+                                            except Exception as e:
+                                                pass
                                                 
-                                                for row in worksheet.iter_rows(min_row=2, min_col=first_date_col_idx, max_col=last_date_col_idx):
-                                                    for cell in row:
-                                                        if cell.value == 1:
-                                                            cell.fill = red_fill
-                                        except Exception as e:
-                                            pass
-                                            
-                                    st.download_button(
-                                        label="📊 Download Night Shift Report as Excel",
-                                        data=output.getvalue(),
-                                        file_name=f"{Path(uploaded_file.name).stem}_night_shift_{selected_year}_{month_str_file}.xlsx",
-                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                        key=f"excel_{month_str_file}_night_shift"
-                                    )
+                                        st.download_button(
+                                            label="📊 Download Night Shift Report as Excel",
+                                            data=output.getvalue(),
+                                            file_name=f"{Path(uploaded_file.name).stem}_night_shift_{selected_year}_{month_str_file}.xlsx",
+                                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                            key=f"excel_{month_str_file}_night_shift"
+                                        )
 
     # Instructions
     with st.expander("📖 How to Use"):

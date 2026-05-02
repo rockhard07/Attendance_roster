@@ -227,17 +227,18 @@ class AttendancePDFExtractor:
             
             # Extract all date headers from first header row (columns 3 onwards)
             date_headers = {}
-            date_pattern = re.compile(r'([A-Za-z]+\.?\s+\d{1,2}\.\d{2})')
+            # Match date pattern like "Tue. 13.01" or "01.04" even if they have spaces
+            date_pattern = re.compile(r'(\d{1,2}\.\d{2})')
             
             if header_rows and len(header_rows) > 0:
                 for col_idx in range(3, len(header_rows[0])):
                     header_val = str(header_rows[0][col_idx]).strip()
                     if header_val:
-                        header_val = header_val.replace('\n', ' ').replace('\r', ' ')
-                        header_val = ' '.join(header_val.split())
-                        # Check if header matches date pattern (e.g., "Tue. 13.01")
-                        if date_pattern.match(header_val):
-                            date_headers[col_idx] = header_val
+                        # Remove all spaces and newlines to handle "W e d . 0 1 . 0 4"
+                        clean_header = header_val.replace('\n', '').replace('\r', '').replace(' ', '')
+                        # Check if header contains a date pattern (e.g., "13.01")
+                        if date_pattern.search(clean_header):
+                            date_headers[col_idx] = clean_header
 
             # Process each employee row
             for row in table[data_start:]:

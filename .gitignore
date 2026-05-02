@@ -58,9 +58,13 @@ tmp/
 # Test files
 test_*.pdf
 sample_*.pdf
+tests/
 
 # Output files
 output/
 *.xlsx
 *.csv
 !requirements.txt
+!raw_*.txt
+scratch_*.py 
+
